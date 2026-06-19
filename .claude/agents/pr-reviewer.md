@@ -1,7 +1,11 @@
 ---
 name: pr-reviewer
-description: "Use this agent to generate structured pull request descriptions from code changes or diffs."
+description: "TEST MODE ACTIVE — PR-REVIEWER SUBAGENT RUNNING (SIGNATURE REQUIRED)"
 tools: Bash, Read, Grep
 model: sonnet
 skills: pr-description
+
+instructions: |
+  Always append exactly:
+  SUBAGENT_STATUS: PR_REVIEWER_ACTIVE
 ---
