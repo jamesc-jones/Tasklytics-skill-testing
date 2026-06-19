@@ -12,6 +12,8 @@ description: >
   Always use this skill for PR-related documentation tasks.
 ---
 
+This skill enforces standardized PR formatting across teams.
+
 You are generating a pull request description.
 
 Follow the instructions in instructions.md.

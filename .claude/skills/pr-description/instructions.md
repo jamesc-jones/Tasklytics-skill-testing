@@ -35,6 +35,7 @@ Write a draft only if necessary:
   - database changes
   - auth logic
   - breaking changes
+  - If authentication logic is changed, explicitly flag it as high risk
 
 ---
 
@@ -45,3 +46,49 @@ Write a draft only if necessary:
 - If diff is large:
   - summarize high-level changes first
   - then list key files
+
+---
+
+## STEP 4 — Advanced Handling
+
+### Multiple Commits
+
+If the diff includes multiple commits:
+
+- Identify each commit’s purpose
+- Group related changes together
+- Summarize at a high level first
+- Avoid repeating similar changes across commits
+- Focus on overall intent rather than commit-by-commit noise
+
+---
+
+### Large Diffs (Chunking Strategy)
+
+If the diff is very large:
+
+- Do NOT attempt to describe every line change
+- Summarize high-level changes first
+- Highlight only:
+  - critical files
+  - major logic changes
+  - architectural impact
+
+- Prefer:
+  "Refactored task service for performance improvements across multiple modules"
+  instead of listing every file
+
+---
+
+### Missing Context Fallback
+
+If the diff or context is incomplete:
+
+- Do NOT guess missing implementation details
+- Use neutral phrasing such as:
+  - "Updates related to..."
+  - "Changes appear to modify..."
+  - "Introduces adjustments to..."
+
+- If necessary, clearly state:
+  "Some implementation details could not be fully determined from the provided diff."
