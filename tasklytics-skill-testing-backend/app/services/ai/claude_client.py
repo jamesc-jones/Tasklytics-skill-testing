@@ -2,8 +2,10 @@ import os
 import anthropic
 
 client = anthropic.Anthropic(
-    api_key=os.getenv("CLAUDE_API_KEY")
+    api_key=os.getenv("ANTHROPIC_API_KEY")
 )
+
+print("ANTHROPIC KEY:", os.getenv("ANTHROPIC_API_KEY"))
 
 def call_claude(tasks_context, user_message):
     prompt= f"""
@@ -11,12 +13,14 @@ def call_claude(tasks_context, user_message):
     
     Use ONLY the provided tasks.
     
-    Return structured JSON:
+    Return STRICT JSON ONLY with this structure:
     {{
-    "response": "...",
-    "priority_tasks": [],
-    "insight": ""
+    "response": "string",
+    "priority_tasks": ["string"],
+    "insight": "string"
     }}
+    
+    If no tasks exist, return empty arrays.
     
     Tasks:
     {tasks_context}
@@ -25,9 +29,11 @@ def call_claude(tasks_context, user_message):
     {user_message}
     """
 
+    print("STEP 1: calling Claude")
+
     response = client.messages.create(
         model="claude-3-5-sonnet-20241022",
-        max_tokens=500,
+        max_tokens=300,
         temperature=0.2,
         messages=[
             {
@@ -36,5 +42,8 @@ def call_claude(tasks_context, user_message):
             }
         ]
     )
+
+    print("STEP 2: Claude returned")
+
 
     return response.content[0].text

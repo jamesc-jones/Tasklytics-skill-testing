@@ -6,6 +6,8 @@ from app.services.ai.response_parser import parse_claude_response
 
 from app.database import get_db
 
+from app.models import User, Task
+
 router = APIRouter()
 
 @router.post("/chat", response_model=ChatResponse)

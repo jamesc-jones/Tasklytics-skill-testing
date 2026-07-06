@@ -9,6 +9,8 @@ from app.ai.routes import router as ai_router
 
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes import chat
+
 app = FastAPI(
     title="Tasklytics API",
     description="Task management backend with JWT auth",
@@ -47,6 +49,8 @@ app.include_router(admin.router)
 app.include_router(analytics.router)
 
 app.include_router(ai_router)
+
+app.include_router(chat.router)
 
 @app.get("/")
 def root():
