@@ -3,7 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 
-from app import models
+from app.models import User, Task
 
 import os
 
@@ -32,14 +32,14 @@ def get_current_user(
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    user = db.query(models.User).filter(models.User.id == int(user_id)).first()
+    user = db.query(User).filter(User.id == int(user_id)).first()
 
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
     return user
 
-def require_admin(current_user: models.User = Depends(get_current_user)):
+def require_admin(current_user: User = Depends(get_current_user)):
     print("ROLE:", current_user.role)
 
     if current_user.role != "admin":

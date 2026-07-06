@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app import models
+from app.models import User, Task
 from app.auth.auth_dependencies import get_current_user
 
 from app.schemas import TaskCreate, TaskUpdate
@@ -20,10 +20,10 @@ def get_tasks(
 ):
 
     if current_user.role == "admin":
-        tasks = db.query(models.Task).all()
+        tasks = db.query(Task).all()
     else:
-        tasks = db.query(models.Task).filter(
-            models.Task.user_id == current_user.id
+        tasks = db.query(Task).filter(
+            Task.user_id == current_user.id
         ).all()
 
     return success_response("Tasks fetched successfully", tasks)
@@ -38,7 +38,7 @@ def create_task(
         current_user=Depends(get_current_user)
 ):
 
-    new_task = models.Task(
+    new_task = Task(
         title=task.title,
         description=task.description,
         priority=task.priority,
@@ -61,10 +61,10 @@ def update_task(
         current_user=Depends(get_current_user)
 ):
 
-    query = db.query(models.Task).filter(models.Task.id == task_id)
+    query = db.query(Task).filter(Task.id == task_id)
 
     if current_user.role != "admin":
-        query = query.filter(models.Task.user_id == current_user.id)
+        query = query.filter(Task.user_id == current_user.id)
 
     db_task = query.first()
 
@@ -89,10 +89,10 @@ def delete_task(
         current_user=Depends(get_current_user)
 ):
 
-    query = db.query(models.Task).filter(models.Task.id == task_id)
+    query = db.query(Task).filter(Task.id == task_id)
 
     if current_user.role != "admin":
-        query = query.filter(models.Task.user_id == current_user.id)
+        query = query.filter(Task.user_id == current_user.id)
 
     db_task = query.first()
 
@@ -111,12 +111,12 @@ def get_analytics(
         current_user=Depends(get_current_user)
 ):
 
-    base_query = db.query(models.Task)
+    base_query = db.query(Task)
 
     # role-based filtering
     if current_user.role != "admin":
         base_query = base_query.filter(
-            models.Task.user_id == current_user.id
+            Task.user_id == current_user.id
         )
 
     tasks = base_query.all()
