@@ -1,4 +1,5 @@
 import os
+import json
 import anthropic
 
 client = anthropic.Anthropic(
@@ -8,6 +9,12 @@ client = anthropic.Anthropic(
 # print("API KEY:", os.getenv("ANTHROPIC_API_KEY")) used to debug issues
 
 def call_claude(tasks_context, user_message):
+
+    context_json = json.dumps(
+        tasks_context,
+        indent=2
+    )
+
     prompt = f"""
     You are a productivity assistant inside Tasklytics.
 
@@ -23,7 +30,7 @@ def call_claude(tasks_context, user_message):
     }}
 
     Tasks:
-    {tasks_context}
+    {context_json}
 
     User message:
     {user_message}
