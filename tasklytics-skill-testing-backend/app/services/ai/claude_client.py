@@ -5,30 +5,37 @@ client = anthropic.Anthropic(
     api_key=os.getenv("ANTHROPIC_API_KEY")
 )
 
+# print("API KEY:", os.getenv("ANTHROPIC_API_KEY")) used to debug issues
+
 def call_claude(tasks_context, user_message):
-    prompt= f"""
+    prompt = f"""
     You are a productivity assistant inside Tasklytics.
-    
-    Use ONLY the provided tasks.
-    
-    Return STRICT JSON ONLY with this structure:
+
+    Return ONLY raw JSON.
+    DO NOT use markdown.
+    DO NOT wrap in ```.
+
+    Return STRICT JSON with this structure:
     {{
     "response": "string",
     "priority_tasks": ["string"],
     "insight": "string"
     }}
-    
-    If no tasks exist, return empty arrays.
-    
+
     Tasks:
     {tasks_context}
-    
+
     User message:
     {user_message}
+    
+    Focus on:
+    - What tasks matter most today
+    - What should be done first
+    - Any productivity insights    
     """
 
     response = client.messages.create(
-        model="claude-3-5-sonnet-20241022",
+        model="claude-sonnet-4-5",
         max_tokens=300,
         temperature=0.2,
         messages=[
