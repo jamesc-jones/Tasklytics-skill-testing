@@ -6,6 +6,7 @@ import CreateTask from "../components/CreateTask";
 import TaskList from "../components/TaskList";
 import Analytics from "../components/Analytics";
 import AIInsights from "../components/AIInsights";
+import ChatContainer from "../components/chat/ChatContainer";
 
 export default function Dashboard() {
     const { token } = useContext(AuthContext);
@@ -45,6 +46,8 @@ export default function Dashboard() {
             {/* AI */}
             <AIInsights tasks={tasks} token={token}/>
 
+            {/* CHAT */}
+            <ChatContainer token={token} />
 
             {/* TASK LIST */}
             <TaskList tasks={tasks} setTasks={setTasks} token={token} />
