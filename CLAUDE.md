@@ -8,8 +8,8 @@ Two independently-run apps plus a reverse-proxy config, in one repo:
 
 - `tasklytics-skill-testing-backend/` — FastAPI + SQLAlchemy + Alembic, Python 3.11
 - `tasklytics-skill-testing-frontend/` — React 19 + Vite (plain JS/JSX, no TypeScript)
-- `nginx/default.conf` — production reverse proxy (`/` → frontend:3000, `/api/` → backend:8000, with rate limiting)
-- `docker-compose.yml` (repo root) — orchestrates backend, frontend, postgres, nginx. Its `build:` paths (`./tasklytics-backend`, `./tasklytics-frontend`) do **not** match the actual folder names (`tasklytics-skill-testing-backend`/`-frontend`), so this root compose file is currently broken/stale. Each app also has its own `docker-compose.yml` inside its own directory.
+- `nginx/default.conf` — reverse proxy (`/` → frontend:3000, `/api/` → backend:8000, with rate limiting + a block on `.env`/`.git` paths). Currently **HTTP-only, no TLS** — it was stripped down to a local-dev config because the previous version required Let's Encrypt certs that don't exist locally. If deploying to a real host, restore HTTPS (or add a separate prod config) before going live; don't assume this file is production-ready as-is.
+- `docker-compose.yml` (repo root) — orchestrates backend, frontend, postgres, nginx; builds paths now correctly point at `tasklytics-skill-testing-backend`/`-frontend`. Only `nginx` publishes a host port (`80:80`); backend/frontend/db use `expose` only and are reachable solely over the Compose network. Backend/frontend each read their env from `.env.docker`/`.env` via `env_file:` (see `tasklytics-skill-testing-backend/.env.docker.example` for the template and required var names). Note: the `db` service's `POSTGRES_PASSWORD` is currently a real value hardcoded directly in this committed compose file, not sourced from an env file — treat it as already-exposed and rotate/parameterize before any real deployment. Each app also has its own `docker-compose.yml` inside its own directory, independent of this root one.
 
 ## Commands
 
@@ -21,7 +21,7 @@ Two independently-run apps plus a reverse-proxy config, in one repo:
 - Apply migrations: `alembic upgrade head`
 - Run all tests: `python -m pytest tests/` (must be `python -m pytest`, not bare `pytest` — there's no `pyproject.toml`/`pytest.ini` setting `pythonpath`, so `-m` is what puts this directory's `app` package on `sys.path`)
 - Run a single test: `python -m pytest tests/routes/test_chat.py::TestChatEndpointSuccess -v` (or `-k <name>`)
-- Test tooling gap: `pytest`, `httpx`, and `anthropic` are required to import/run the suite but are **not yet declared in `requirements.txt`** — install them manually into `.venv` (`pip install pytest httpx anthropic`) until that's fixed. `anthropic` is required even just to import `app.main`, since `app/services/ai/claude_client.py` constructs an `anthropic.Anthropic()` client at module load time.
+- `pytest`, `httpx`, and `anthropic` are declared in `requirements.txt`, so a plain `pip install -r requirements.txt` covers both running the app and running the test suite. `anthropic` is required even just to import `app.main`, since `app/services/ai/claude_client.py` constructs an `anthropic.Anthropic()` client at module load time — a missing/invalid `ANTHROPIC_API_KEY` breaks app startup, not just chat requests.
 
 ### Frontend — run from `tasklytics-skill-testing-frontend/`
 
@@ -34,7 +34,7 @@ Two independently-run apps plus a reverse-proxy config, in one repo:
 
 ### Environment variables
 
-Backend (`.env` locally, `.env.docker`/`.env.production` for deployment): `DATABASE_URL`, `SECRET_KEY`, `ENV`, `ANTHROPIC_API_KEY`, `TOGETHER_API_KEY`, `VOYAGE_API_KEY`. `DATABASE_URL` may point at SQLite (local dev — see `tasklytics.db`) or Postgres; `app/database.py` branches on the URL scheme. `ENV=docker` skips loading `.env` via `python-dotenv` (Docker injects env vars directly).
+Backend (`.env` locally, `.env.docker`/`.env.production` for deployment — all gitignored except the `.env.docker.example` template): `DATABASE_URL`, `SECRET_KEY`, `ENV`, `ANTHROPIC_API_KEY`, `TOGETHER_API_KEY`, `VOYAGE_API_KEY`. `DATABASE_URL` may point at SQLite (local dev — see `tasklytics.db`) or Postgres; `app/database.py` branches on the URL scheme. In Docker, the Postgres host must be `db` (the Compose service name), not `localhost`, and the user/password/dbname must match the `db` service's own env in `docker-compose.yml`. `ENV=docker` skips loading `.env` via `python-dotenv` (Docker injects env vars directly).
 
 Frontend: `VITE_API_URL` (defaults to `/api`, see `src/api/config.js`).
 
@@ -75,7 +75,8 @@ Isolated per-test in-memory SQLite (`StaticPool` + `check_same_thread=False`) wi
 - `src/api/` — one file per backend resource (`api.js`, `ai.js`, `analytics.js`), all built on `fetch` and reading the base URL from `src/api/config.js`. Auth token is passed explicitly into each call, not attached globally.
 - `src/context/AuthContext.jsx` — holds the JWT in state + `localStorage`; note the token-reload-on-mount `useEffect` is currently commented out.
 - `src/components/ProtectedRoute.jsx` — route guard reading `AuthContext`, used around `/dashboard` in `src/App.jsx`.
-- `src/pages/` — routed views (`Login`, `Register`, `Dashboard`). `Dashboard` composes `TaskList`, `CreateTask`, `Analytics`, `TaskChart`, `AIInsights`.
+- `src/pages/` — routed views (`Login`, `Register`, `Dashboard`). `Dashboard` composes `CreateTask`, `Analytics`, `AIInsights`, `ChatContainer`, `TaskList` (in that render order).
+- `src/components/chat/` — `ChatContainer` (holds message state, calls the `/chat` endpoint), `ChatMessages`, `ChatInput`. Separate from `AIInsights`, which hits the legacy `app/ai/` single-shot endpoint — don't conflate the two AI surfaces on the frontend either.
 
 ## Notes
 
