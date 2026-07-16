@@ -85,21 +85,40 @@ docker exec -it tasklytics_db psql -U postgres -d tasklytics -c "\dt"
 
 ## Backup & restore
 
+**Status: confirmed operational on the live VPS** (see `docs/PHASE_4_COMPLETION_REPORT.md`) — daily `pg_dump` cron, 30-day retention cleanup, and `cron.service` active, all confirmed via real command output. The manual commands below still work standalone; `scripts/` (repo root) now wraps the validation and restore steps so they don't need to be retyped by hand during an actual incident.
+
 ```bash
 # Manual backup
 docker exec tasklytics_db pg_dump -U postgres tasklytics > /var/backups/tasklytics/tasklytics_backup_$(date +%Y-%m-%d).sql
 
-# Automated (cron)
+# Automated (cron) - confirmed present on the VPS
 # 0 2 * * * docker exec tasklytics_db pg_dump -U postgres tasklytics > /var/backups/tasklytics/tasklytics_backup_$(date +\%Y-\%m-\%d).sql
 # 0 3 * * * find /var/backups/tasklytics -type f -mtime +30 -delete
 
-# Restore test (into a throwaway database, never directly into production)
-docker exec -it tasklytics_db psql -U postgres -c "CREATE DATABASE tasklytics_restore_test;"
-docker exec -i tasklytics_db psql -U postgres -d tasklytics_restore_test < /var/backups/tasklytics/tasklytics_backup_YYYY-MM-DD.sql
-docker exec -it tasklytics_db psql -U postgres -d tasklytics_restore_test -c "SELECT count(*) FROM users; SELECT count(*) FROM tasks;"
-docker exec -it tasklytics_db psql -U postgres -c "DROP DATABASE tasklytics_restore_test;"
+# Validate today's backup actually ran and is non-empty/recent
+./scripts/validate-backup.sh /var/backups/tasklytics 25
+# Consider adding to cron a few minutes after the 2am dump:
+# 0 5 * * * /path/to/repo/scripts/validate-backup.sh || mail -s "Tasklytics backup validation failed" you@example.com
+
+# Restore into a throwaway database (never directly into production)
+./scripts/restore-backup.sh /var/backups/tasklytics/tasklytics_backup_YYYY-MM-DD.sql tasklytics_restore_test
+# Review the reported counts, then drop when done (the script prints the exact command)
 ```
-**Status as of this writing: unconfirmed on the live VPS** — prior conversation notes conflict on whether the cron entries are actually present. Run `crontab -l` and `ls -la /var/backups/tasklytics/` to confirm before relying on this.
+
+Both scripts were verified against real Postgres containers and real dump files before being committed (not just syntax-checked) — see `docs/PHASE_5_EXECUTION_TRACKER.md` item 5A.1 for the specific test cases and results.
+
+### Off-server backup setup (manual — requires an external account)
+
+Backups currently exist only on the same VPS disk as the data they protect — a real, documented residual risk. `scripts/backup-sync.sh` wraps the sync step, but it requires an object storage account that can't be created without you:
+
+1. Create a DigitalOcean Spaces bucket (or any S3-compatible object storage) — DigitalOcean Control Panel → Spaces → Create Space.
+2. Generate a Spaces API key (Control Panel → API → Spaces Keys).
+3. Install `rclone` on the VPS: `sudo apt install -y rclone`.
+4. Configure the remote: `rclone config` → New remote → type `s3` → provider `DigitalOcean Spaces` → paste the key/secret from step 2.
+5. Test: `./scripts/backup-sync.sh /var/backups/tasklytics spaces:your-bucket-name` — should report matching local/remote file counts.
+6. Add to cron, after the nightly dump: `30 2 * * * /path/to/repo/scripts/backup-sync.sh /var/backups/tasklytics spaces:your-bucket-name`
+
+Not performed as part of this work — no account was created, per the constraint on this pass. This is genuinely blocked on a human action, not a shortcut.
 
 ## Security posture (as last verified in-conversation, not re-confirmed today)
 
