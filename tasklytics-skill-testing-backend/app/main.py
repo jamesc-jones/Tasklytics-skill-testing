@@ -1,4 +1,7 @@
 from dotenv import load_dotenv
+from sqlalchemy import text
+import time
+
 load_dotenv()
 
 import os
@@ -66,5 +69,27 @@ app.include_router(chat.router)
 @app.get("/")
 def root():
     return {"message": "Tasklytics Backend API running!"}
+
+@app.get("/health")
+def health_check():
+    try:
+        # Check database connection
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+
+        return {
+            "status": "ok",
+            "service": "tasklytics-backend",
+            "database": "connected",
+            "timestamp": time.time()
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "service": "tasklytics-backend",
+            "database": "disconnected",
+            "error": str(e)
+        }
 
 # Testing PR Skill
