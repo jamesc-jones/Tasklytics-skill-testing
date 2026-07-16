@@ -120,6 +120,29 @@ Backups currently exist only on the same VPS disk as the data they protect — a
 
 Not performed as part of this work — no account was created, per the constraint on this pass. This is genuinely blocked on a human action, not a shortcut.
 
+## Monitoring & alerting
+
+**Status: not yet configured** — no automated uptime monitoring exists today; health verification has only ever happened via manual `curl` during deployment sessions. No external monitoring account was created as part of this work, per the "no external accounts" constraint — documenting the exact manual setup instead.
+
+**Health check target:** the backend has no dedicated `/health` route — the root endpoint doubles as one:
+```
+GET https://tasklytics2ai.com/api/
+Expected: 200, body {"message":"Tasklytics Backend API running!"}
+```
+This proves nginx→backend routing works. It does **not** touch the database — for a deeper check, see `PRODUCTION_RUNBOOK.md`'s "Tracing one request end-to-end" section above, which uses a login attempt against `/api/auth/login` as an indirect database-connectivity check.
+
+### Manual setup (external account required)
+
+1. Create a free account at an uptime-monitoring service (e.g., UptimeRobot).
+2. Add an HTTP(S) monitor:
+   - URL: `https://tasklytics2ai.com/api/`
+   - Expected status: `200`
+   - Interval: 5 minutes (free-tier typical minimum)
+   - Alert contact: email (and SMS if the plan supports it)
+3. Verify the monitor actually works before trusting it: stop `tasklytics_nginx` (`docker compose stop nginx`), confirm an alert fires within the configured interval, then `docker compose start nginx` and confirm a recovery notification also fires.
+
+Not performed here — genuinely requires an account only you can create.
+
 ## Security posture (as last verified in-conversation, not re-confirmed today)
 
 - UFW: 22/80/443 allowed, default deny incoming
@@ -130,10 +153,13 @@ Not performed as part of this work — no account was created, per the constrain
 - Secrets: `.env`/`.env.docker` gitignored; `docker-compose.yml`'s `db` service reads `POSTGRES_*` from a gitignored root `.env` rather than a literal value
 - Known residual: the original leaked Postgres password remains in git history (rotated live, not purged from history — accepted tradeoff, documented decision)
 
-## Open items — not yet confirmed with real command output
+## Open items
 
-- [ ] `ANTHROPIC_API_KEY` presence/format on the live container
-- [ ] Automated backup cron entries actually present and running
-- [ ] `/api/chat` and `/api/ai/task-insights` tested against production with a real token
-- [ ] Log rotation (`max-size`/`max-file`) confirmed applied on the live containers post-deploy
-- [ ] Whether `/etc/docker/daemon.json` also sets a host-level default (would be redundant with, not conflicting with, the per-service config)
+The five items below (`ANTHROPIC_API_KEY` presence, backup cron status, `/api/chat` and `/api/ai/task-insights` production tests, live log rotation, `daemon.json` presence) were all resolved with real command output — see `docs/PHASE_4_COMPLETION_REPORT.md`. Current open items, from Phase 5:
+
+- [ ] Uptime monitoring account creation and setup (documented above, blocked on human action)
+- [ ] Off-server backup storage account creation and setup (documented above, blocked on human action)
+- [ ] Sentry `SENTRY_DSN` — scaffold is in place and verified inert/functional in both directions (`app/main.py`), but no real project/DSN has been created
+- [ ] Frontend JWT silent-refresh integration (`AuthContext.jsx`/`api/api.js`) — backend `/auth/refresh` is implemented and tested, frontend wiring is not
+- [ ] A real run of `tests/ai_eval/run_eval.py` against the live Claude API — the framework is built and its assertion logic is verified against synthetic data, but never run against a real response
+- [ ] 4 pre-existing frontend lint errors (`TaskList.jsx`, `AuthContext.jsx`, `Register.jsx`) — unrelated to Phase 5, left untouched as out of scope, CI's lint step is report-only because of this
