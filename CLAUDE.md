@@ -8,7 +8,15 @@ Two independently-run apps plus a reverse-proxy config, in one repo:
 
 - `tasklytics-skill-testing-backend/` — FastAPI + SQLAlchemy + Alembic, Python 3.11
 - `tasklytics-skill-testing-frontend/` — React 19 + Vite (plain JS/JSX, no TypeScript)
-- `nginx/default.conf` — reverse proxy (`/` → frontend:3000, `/api/` → backend:8000, with rate limiting + a block on `.env`/`.git` paths). **HTTPS is enabled**: a dedicated `server` block listens on `443 ssl` and terminates TLS at nginx, redirecting all port-80 traffic to HTTPS; certificates are managed via Let's Encrypt/Certbot (webroot-authenticated renewal, `/etc/letsencrypt/live/tasklytics2ai.com/`), mounted read-only into the nginx container. Two explicit `location =` allow-rules exist for `/api/docs` and `/api/openapi.json`, evaluated before the broader sensitive-file blocking rules (exact-match locations take precedence over regex locations in nginx regardless of file order).
+- `nginx/default.conf` — production-ready reverse proxy.
+  - **HTTPS enabled** (Let's Encrypt/Certbot, webroot-authenticated renewal, certs at `/etc/letsencrypt/live/tasklytics2ai.com/`, mounted read-only into the container). A dedicated `server` block listens on `443 ssl` and terminates TLS at nginx; all port-80 traffic is redirected to HTTPS.
+  - Routes:
+    - `/` → frontend (`frontend:3000`)
+    - `/api/` → backend (`backend:8000`)
+  - Security:
+    - Rate limiting on `/api/`
+    - Sensitive file blocking (`.env`, `.git`, and other config/backup file extensions)
+    - Explicit `location =` allow-rules for `/api/docs` and `/api/openapi.json`, evaluated before the blocking rules — exact-match locations take precedence over regex locations in nginx regardless of file order, so these stay reachable even as the blocking rules evolve
 - `docker-compose.yml` (repo root) — orchestrates backend, frontend, postgres, nginx; builds paths now correctly point at `tasklytics-skill-testing-backend`/`-frontend`. Both `nginx` host ports (`80:80`, `443:443`) are published; backend/frontend/db use `expose` only and are reachable solely over the Compose network. Backend/frontend each read their env from `.env.docker`/`.env` via `env_file:` (see `tasklytics-skill-testing-backend/.env.docker.example` for the template and required var names). The `db` service's `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` are read via `${VAR}` substitution from a gitignored root `.env` — no credentials are committed to the repository; production secrets are injected via environment variables/deployment configuration, not literal values in tracked files. Each app also has its own `docker-compose.yml` inside its own directory, independent of this root one.
 
 ## Commands
