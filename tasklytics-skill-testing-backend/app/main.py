@@ -1,6 +1,17 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import os
+import sentry_sdk
+
+# Inert if SENTRY_DSN is unset/empty - sentry_sdk.init(dsn=None) is a documented
+# no-op (no events captured, no network calls), so this is safe to ship before
+# a real DSN exists. See docs/PHASE_5_EXECUTION_TRACKER.md for setup steps.
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN") or None,
+    traces_sample_rate=0.0,
+)
+
 from fastapi import FastAPI
 from app.routes import auth, tasks, admin, analytics
 from app.database import Base, engine
