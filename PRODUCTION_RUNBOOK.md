@@ -122,26 +122,122 @@ Not performed as part of this work — no account was created, per the constrain
 
 ## Monitoring & alerting
 
-**Status: not yet configured** — no automated uptime monitoring exists today; health verification has only ever happened via manual `curl` during deployment sessions. No external monitoring account was created as part of this work, per the "no external accounts" constraint — documenting the exact manual setup instead.
+**Status: configured and verified.** External uptime monitoring via UptimeRobot (free tier), two independent monitors — a failure in only one narrows down which layer broke without checking logs first.
 
-**Health check target:** the backend has no dedicated `/health` route — the root endpoint doubles as one:
+| Monitor | Type | Target | Detects |
+|---|---|---|---|
+| Public Website | HTTP(S) | `https://tasklytics2ai.com/` | DNS, TLS handshake, nginx, frontend reachability |
+| Backend Health | **Keyword** | `https://tasklytics2ai.com/api/health` | Backend process + database connectivity specifically |
+
+**Why the backend monitor uses a keyword, not a status code:** `/health` (`app/main.py`) returns HTTP `200` in **both** its success and failure branches — the `except` branch returns `{"status": "error", ...}` but never overrides the status code. A plain "check for 200" monitor would never detect a database outage through this endpoint. The keyword `"status":"ok"` (exact string, no space after the colon — matches FastAPI's default JSON serialization) is what actually distinguishes healthy from degraded.
+
+**Verified by deliberate failure injection**, not assumed: stopped `tasklytics_nginx` → Public monitor went DOWN (connection timeout) → alert received. Stopped `tasklytics_backend` → Health monitor went DOWN (keyword missing) → alert received. Restarted both → recovery alerts received for each. This is the actual proof the monitors detect what they're meant to.
+
+### Alerting configuration — reducing noise without losing signal
+
+**Consecutive-failure threshold (the single highest-leverage noise control on free tier):** set each monitor to alert only after **2 consecutive failed checks**, not the first. A lone failed check is frequently a transient network blip between UptimeRobot's checking infrastructure and the VPS, not a real outage — alerting on check #1 trains you to ignore alerts; requiring 2 in a row (≈10 minutes at a 5-minute interval) filters that out while still catching anything that's actually down.
+
+**One alert contact, not several overlapping ones:** a single email contact applied to both monitors. Adding redundant contacts (e.g., a personal email *and* a team alias both wired to the same monitor) is how duplicate alerts happen — one incident, multiple pings, and eventually someone starts ignoring one of the channels.
+
+**Notify on both directions:** enable Down *and* Up (recovery) per monitor. Without the recovery alert, "is it still broken?" becomes a manual check instead of a notification — you want to be told the incident ended, not just that it started.
+
+**Pause during planned maintenance:** before any deploy that recreates containers (`docker compose down` / `up -d --build`), pause both monitors, then unpause once verification (below) passes. A self-inflicted alert during a routine deploy is exactly the kind of noise that erodes trust in the alerting system — treat a paused monitor as a deliberate, logged action, not something to forget to re-enable.
+
+**Slack / mobile, free-tier aware:** UptimeRobot's own mobile app supports push notifications on the free tier. For Slack specifically, check your dashboard's current alert-contact options before assuming a specific integration is free vs. paid — tier features change over time and this should be confirmed live rather than assumed stale from documentation. A **Webhook** alert contact (commonly available on free tier) pointed at a Slack Incoming Webhook URL is the usual no-paid-tier path if a native Slack integration isn't available on your plan.
+
+### Verifying alerting changes actually work
+
+Any time an alert setting changes (threshold, contact, pause behavior), re-run the same deliberate-failure test used to originally verify the monitors — stop the relevant container, confirm the alert behaves as newly configured (e.g., confirm it does *not* fire on the first failed check if the threshold was just raised to 2), restart, confirm recovery. A settings change that hasn't been re-verified is a claim, not a fact — same standard as everything else in this runbook.
+
+## Incident Response
+
+Detect → diagnose → recover → verify, for the three failure categories UptimeRobot's monitors can surface. Commands here are pointers into "Debugging workflow" above, not duplicated — this section is the decision flow for *which* command to run first, not a second copy of the commands themselves.
+
+### 1. Detection
+
+An incident starts with one of:
+- UptimeRobot alert email (Public Website or Backend Health monitor DOWN)
+- A user report
+- Manual observation
+
+First action, always: `docker compose ps` — before diagnosing anything, know which containers are actually `Up` vs. `Restarting`/exited. This alone often answers "which of the three scenarios below applies" in one command.
+
+### 2. Diagnosis by scenario
+
+**Scenario A — Site down (Public Website monitor DOWN, connection timeout)**
+
+Meaning: nginx itself is unreachable — this is the outermost layer, so start there, not with the backend.
+```bash
+docker compose ps                    # is tasklytics_nginx Up?
+docker logs --tail 50 tasklytics_nginx
+docker exec tasklytics_nginx nginx -t
 ```
-GET https://tasklytics2ai.com/api/
-Expected: 200, body {"message":"Tasklytics Backend API running!"}
+- Container not `Up` → it crashed or was stopped; see Recovery §3a.
+- Container `Up` but still unreachable externally → check the VPS firewall (`sudo ufw status`) hasn't changed, and that DNS still resolves to the right IP (`dig tasklytics2ai.com`) — this is an infrastructure-layer problem, not a container problem.
+
+**Scenario B — Backend failure (Backend Health monitor DOWN, keyword `"status":"ok"` missing)**
+
+Meaning: nginx and the frontend are fine (Public monitor still UP); the backend process is down, or it's up but its database check inside `/health` is failing.
+```bash
+docker compose ps                    # is tasklytics_backend Up?
+docker logs --tail 50 tasklytics_backend
+docker logs -f tasklytics_backend    # live, if you can reproduce the failure
+curl -s https://tasklytics2ai.com/api/health   # read the actual JSON — "database":"disconnected" narrows straight to Scenario C
 ```
-This proves nginx→backend routing works. It does **not** touch the database — for a deeper check, see `PRODUCTION_RUNBOOK.md`'s "Tracing one request end-to-end" section above, which uses a login attempt against `/api/auth/login` as an indirect database-connectivity check.
+- Container not `Up` / crash-looping → check the traceback in the logs; common causes already documented: missing/invalid `ANTHROPIC_API_KEY` (crashes at import, not just at request time), missing `SECRET_KEY`.
+- Container `Up`, `/health` responds but with `"database":"disconnected"` → this **is** Scenario C, go there directly.
 
-### Manual setup (external account required)
+**Scenario C — Database failure (`/health` reports `"database":"disconnected"`, or `pg_isready` fails)**
 
-1. Create a free account at an uptime-monitoring service (e.g., UptimeRobot).
-2. Add an HTTP(S) monitor:
-   - URL: `https://tasklytics2ai.com/api/`
-   - Expected status: `200`
-   - Interval: 5 minutes (free-tier typical minimum)
-   - Alert contact: email (and SMS if the plan supports it)
-3. Verify the monitor actually works before trusting it: stop `tasklytics_nginx` (`docker compose stop nginx`), confirm an alert fires within the configured interval, then `docker compose start nginx` and confirm a recovery notification also fires.
+```bash
+docker compose ps                    # is tasklytics_db Up?
+docker exec tasklytics_db pg_isready -U postgres -d tasklytics
+docker logs --tail 50 tasklytics_db
+```
+- Container not `Up` → see Recovery §3c. Check `docker volume ls` / `docker volume inspect postgres_data` still exists before restarting — this is the one scenario where you should pause and confirm the volume is intact before touching anything, since it holds the only copy of production data outside of backups.
+- Container `Up`, `pg_isready` succeeds, but the backend still reports disconnected → mismatch between `DATABASE_URL` (in `.env.docker`) and the `db` service's actual `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` (in the root `.env`) — a credential drift issue, not a database-down issue. Compare both files directly rather than guessing.
 
-Not performed here — genuinely requires an account only you can create.
+### 3. Recovery
+
+**3a — nginx down:**
+```bash
+docker compose up -d nginx
+docker logs --tail 20 tasklytics_nginx    # confirm clean startup, no repeated crash
+```
+
+**3b — backend down (config/code issue, not a crash loop from bad env):**
+```bash
+docker compose up -d backend
+```
+If it's crash-looping on a config problem (missing env var), fix `.env.docker` first, then:
+```bash
+docker compose up -d backend
+```
+
+**3c — database down:**
+```bash
+docker compose up -d db
+docker exec tasklytics_db pg_isready -U postgres -d tasklytics
+```
+If the container won't start at all and logs show data corruption (not just "was stopped") — **do not** delete and recreate the volume as a first response. Restore from the most recent backup instead (see "Backup & restore" above), into a **new** database name first to confirm the backup is good, before touching production data.
+
+**General-purpose recovery, when a targeted restart doesn't resolve it:**
+```bash
+docker compose down
+docker compose up -d
+```
+`down` without `-v` does not touch the `postgres_data` volume — safe to use, but recreates all four containers, so expect a brief full outage rather than a single-service blip.
+
+### 4. Verification after recovery
+
+Don't close the incident on "the container shows `Up`" alone — confirm functionally:
+```bash
+curl -s https://tasklytics2ai.com/api/health          # expect {"status":"ok",...,"database":"connected"}
+curl -I https://tasklytics2ai.com/                    # expect 200
+```
+Then check both UptimeRobot monitors show **Up** in the dashboard, and confirm the recovery email actually arrived — a monitor showing "Up" without a corresponding recovery notification having fired is itself worth investigating (could mean the alert contact silently broke).
+
+Finally: if the incident required a code or config change (not just a restart), write down what happened and why in this file's "Open items" section or a dedicated postmortem note — an incident that isn't documented tends to repeat.
 
 ## Security posture (as last verified in-conversation, not re-confirmed today)
 
@@ -157,8 +253,10 @@ Not performed here — genuinely requires an account only you can create.
 
 The five items below (`ANTHROPIC_API_KEY` presence, backup cron status, `/api/chat` and `/api/ai/task-insights` production tests, live log rotation, `daemon.json` presence) were all resolved with real command output — see `docs/PHASE_4_COMPLETION_REPORT.md`. Current open items, from Phase 5:
 
-- [ ] Uptime monitoring account creation and setup (documented above, blocked on human action)
-- [ ] Off-server backup storage account creation and setup (documented above, blocked on human action)
+- [x] Uptime monitoring — configured, both monitors verified via deliberate failure injection with real alerts received (see "Monitoring & alerting" above)
+- [x] Off-server backup storage (DigitalOcean Spaces bucket, rclone remote `tasklytics-spaces`) — created and manually verified: `backup-sync.sh` run confirmed remote file count matching local
+- [ ] Off-server backup **automation** — the sync above was a one-time manual run; `crontab -l` needs the `backup-sync.sh` entry added (documented above under "Off-server backup setup") for this to protect data going forward, not just prove the mechanism works once
+- [ ] UptimeRobot alert threshold — recommended 2-consecutive-failure setting (documented above under "Alerting configuration") needs to actually be applied per monitor in the dashboard, then re-verified with a deliberate-failure test
 - [ ] Sentry `SENTRY_DSN` — scaffold is in place and verified inert/functional in both directions (`app/main.py`), but no real project/DSN has been created
 - [ ] Frontend JWT silent-refresh integration (`AuthContext.jsx`/`api/api.js`) — backend `/auth/refresh` is implemented and tested, frontend wiring is not
 - [ ] A real run of `tests/ai_eval/run_eval.py` against the live Claude API — the framework is built and its assertion logic is verified against synthetic data, but never run against a real response
