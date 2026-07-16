@@ -1,12 +1,15 @@
 import os
 import json
+import logging
 import anthropic
+
+from app.services.ai.prompts import CHAT_PROMPT_VERSION, build_chat_prompt
 
 client = anthropic.Anthropic(
     api_key=os.getenv("ANTHROPIC_API_KEY")
 )
 
-# print("API KEY:", os.getenv("ANTHROPIC_API_KEY")) used to debug issues
+logger = logging.getLogger("tasklytics.ai.usage")
 
 def call_claude(tasks_context, user_message):
 
@@ -15,31 +18,7 @@ def call_claude(tasks_context, user_message):
         indent=2
     )
 
-    prompt = f"""
-    You are a productivity assistant inside Tasklytics.
-
-    Return ONLY raw JSON.
-    DO NOT use markdown.
-    DO NOT wrap in ```.
-
-    Return STRICT JSON with this structure:
-    {{
-    "response": "string",
-    "priority_tasks": ["string"],
-    "insight": "string"
-    }}
-
-    Tasks:
-    {context_json}
-
-    User message:
-    {user_message}
-    
-    Focus on:
-    - What tasks matter most today
-    - What should be done first
-    - Any productivity insights    
-    """
+    prompt = build_chat_prompt(context_json, user_message)
 
     response = client.messages.create(
         model="claude-sonnet-4-5",
@@ -51,6 +30,14 @@ def call_claude(tasks_context, user_message):
                 "content": prompt
             }
         ]
+    )
+
+    usage = response.usage
+    logger.info(
+        "claude_usage prompt_version=%s input_tokens=%s output_tokens=%s",
+        CHAT_PROMPT_VERSION,
+        usage.input_tokens,
+        usage.output_tokens,
     )
 
     return response.content[0].text
