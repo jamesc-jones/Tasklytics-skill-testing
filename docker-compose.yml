@@ -22,6 +22,7 @@ services:
       retries: 3
       start_period: 10s
 
+
   frontend:
     build:
       context: ./tasklytics-skill-testing-frontend
@@ -45,6 +46,7 @@ services:
       retries: 3
       start_period: 10s
 
+
   db:
     image: postgres:15.8
     container_name: tasklytics_db
@@ -67,6 +69,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
 
   nginx:
     image: nginx:1.27
@@ -93,6 +96,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
 
 volumes:
   postgres_data:
