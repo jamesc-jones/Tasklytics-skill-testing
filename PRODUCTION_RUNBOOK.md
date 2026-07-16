@@ -149,6 +149,36 @@ Not performed as part of this work — no account was created, per the constrain
 
 Any time an alert setting changes (threshold, contact, pause behavior), re-run the same deliberate-failure test used to originally verify the monitors — stop the relevant container, confirm the alert behaves as newly configured (e.g., confirm it does *not* fire on the first failed check if the threshold was just raised to 2), restart, confirm recovery. A settings change that hasn't been re-verified is a claim, not a fact — same standard as everything else in this runbook.
 
+### Severity levels
+
+Mapped directly to the two real monitors, not an abstract scheme:
+
+| Severity | Trigger | User impact | Response |
+|---|---|---|---|
+| **SEV1 — Critical** | Public Website monitor DOWN | Total outage — nobody can reach the site | Immediate; start Incident Response §1 now |
+| **SEV2 — Degraded** | Backend Health monitor DOWN, Public Website still UP | Site loads, but login/tasks/AI are broken — often worse for trust than a clean outage, since it looks buggy rather than down for maintenance | Immediate; start at Incident Response Scenario B or C directly (Public monitor being UP already rules out Scenario A) |
+| **SEV3 — Minor, non-alerting** | SSL cert inside its renewal window but not yet failed; a single transient AI request failure (Claude/Together) | None visible yet, or isolated to one request | No UptimeRobot alert exists for these today — SSL expiry has no monitor (free-tier gap, see "Free-tier limitations"); AI request failures belong in Sentry once `SENTRY_DSN` is set, not in uptime monitoring, since the app itself is still "up" |
+
+### What should trigger an alert vs. not
+
+**Should alert (wired to UptimeRobot today):**
+- Public site unreachable for 2+ consecutive checks
+- `/api/health` missing the `"status":"ok"` keyword for 2+ consecutive checks
+
+**Should not alert as a production incident (by design):**
+- A single failed AI request — transient upstream API errors are expected occasionally; this is an error-tracking concern (Sentry), not an uptime concern. Alerting on every individual failed AI call would be exactly the kind of noise this runbook's alerting section exists to avoid.
+- `401`/`403`/`422` responses to bad input (wrong password, malformed request) — expected application behavior, not an incident.
+- A failed CI run (`.github/workflows/backend-tests.yml`) — a pre-deploy signal in GitHub, not a live production alert; conflating the two channels would make it harder to tell "code doesn't pass tests" from "production is down."
+
+### Escalation logic (solo developer)
+
+No team to hand off to, so escalation here means **escalating your own response intensity and decision threshold over time** — not escalating to another person:
+
+- **0–10 min from alert:** quick diagnostic pass — Incident Response §1–2 below (`docker compose ps`, targeted logs, obvious restart). Most incidents resolve at this tier.
+- **10–30 min, still unresolved:** stop making incremental guesses. Check whether the last deploy correlates with the incident start (`git log -1 --format=%cd`), consider a full `docker compose down && up -d` recreate rather than continuing to poke at one container.
+- **30+ min unresolved, or any sign of data corruption:** stop touching production. Take a fresh backup of the current (possibly degraded) state before doing anything further — including anything destructive-looking — then restore from the last known-good backup into a **new** database name to confirm it's good, per "Backup & restore" above, before considering promoting it. Under time pressure, memory of "what have I already tried" is unreliable — write it down as you go, not after.
+- **Recurrence rule:** the same incident happening 2+ times in a rolling 7 days is itself an escalation trigger, independent of how fast any single instance was resolved — stop re-applying the same quick fix and schedule dedicated time for root-cause investigation instead. An undocumented incident tends to repeat.
+
 ## Incident Response
 
 Detect → diagnose → recover → verify, for the three failure categories UptimeRobot's monitors can surface. Commands here are pointers into "Debugging workflow" above, not duplicated — this section is the decision flow for *which* command to run first, not a second copy of the commands themselves.
