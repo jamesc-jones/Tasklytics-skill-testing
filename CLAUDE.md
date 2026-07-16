@@ -78,6 +78,64 @@ Isolated per-test in-memory SQLite (`StaticPool` + `check_same_thread=False`) wi
 - `src/pages/` — routed views (`Login`, `Register`, `Dashboard`). `Dashboard` composes `CreateTask`, `Analytics`, `AIInsights`, `ChatContainer`, `TaskList` (in that render order).
 - `src/components/chat/` — `ChatContainer` (holds message state, calls the `/chat` endpoint), `ChatMessages`, `ChatInput`. Separate from `AIInsights`, which hits the legacy `app/ai/` single-shot endpoint — don't conflate the two AI surfaces on the frontend either.
 
+## Production Monitoring
+
+External uptime monitoring via UptimeRobot (free tier), watching the live deployment at `https://tasklytics2ai.com`. Two independent monitors rather than one combined check — a failure in only one immediately narrows down which layer broke, without needing to check container logs first.
+
+### Monitors
+
+1. **Public Website Monitor**
+   - Type: HTTP(S)
+   - Target: `https://tasklytics2ai.com/`
+   - Detects: DNS resolution, TLS handshake, `nginx` availability, and the frontend container being reachable — the baseline "is the site up at all" check.
+
+2. **Backend Health Monitor**
+   - Type: Keyword monitor (deliberately not a plain status-code check — see below)
+   - Target: `https://tasklytics2ai.com/api/health`
+   - Keyword: `"status":"ok"` (exact string, no space after the colon — matches FastAPI's default JSON serialization of the `/health` route)
+   - Alert condition: keyword missing from the response
+   - Detects: backend process and database connectivity specifically, independent of whether the frontend/nginx are still reachable.
+
+### Why the backend monitor uses a keyword, not a status code
+
+`app/main.py`'s `/health` route returns HTTP `200` in **both** its success and failure branches — the `except` branch returns `{"status": "error", ...}` but never overrides the status code. A plain "check for HTTP 200" monitor would therefore never detect a database outage through this endpoint, since it always answers `200` regardless of the database state. The keyword check on `"status":"ok"` is what actually distinguishes a healthy response from a degraded one — this is a real, verified property of the route's current implementation, not a hypothetical.
+
+### Failure interpretation
+
+| Symptom | Meaning |
+|---|---|
+| Public monitor DOWN (connection timeout) | `nginx` itself is unreachable — check `tasklytics_nginx`'s container status first, not the backend |
+| Public monitor UP, health monitor DOWN (keyword missing) | `nginx` and the frontend are fine; the backend process is down or its database connection is broken — check `docker logs tasklytics_backend` and `docker exec tasklytics_db pg_isready` |
+| Both monitors UP | No detected issue at the infrastructure layer this monitoring covers — does not prove every application feature works (e.g., the AI endpoints are outside its scope) |
+
+Both failure modes were deliberately tested by stopping the relevant container (`tasklytics_nginx`, then `tasklytics_backend`) and confirming the expected monitor and alert fired, then confirming a separate recovery alert on restart.
+
+### Architecture flow
+
+```
+UptimeRobot (external)
+        |
+        | HTTPS request every 5 min
+        v
+https://tasklytics2ai.com
+        |
+        v
+   nginx (tasklytics_nginx)  <── [Public monitor checks this hop
+        |                         + everything reachable below it]
+        +--> frontend (SPA)
+        |
+        +--> /api/health --> backend (tasklytics_backend) --> PostgreSQL
+                                    ^
+                   [Backend monitor specifically checks this path,
+                    including the DB connectivity check inside /health]
+```
+
+### Free-tier limitations
+
+- No SSL certificate expiry monitoring — Let's Encrypt renewal is automated (webroot method, verified via `certbot renew --dry-run`), but there is no external tripwire if renewal silently fails. Would need a paid tier or a separate mechanism to close this gap.
+- No monitor grouping — the two monitors are independent dashboard entries, not organized under a shared project/tag.
+- Limited monitor name customization.
+
 ## Notes
 
 - `.claude/CLAUDE.md` (auto-loaded alongside this file) covers the project's tech stack summary, general dev principles, and PR/git standards — this file is the map of how the code actually fits together.
