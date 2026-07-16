@@ -52,13 +52,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create throwaway .env for compose variable substitution (build-only, no real secrets)
+      - name: Create throwaway env files for compose validation (build-only, no real secrets)
         run: |
           cat > .env <<'EOF'
           POSTGRES_USER=ci_placeholder
           POSTGRES_PASSWORD=ci_placeholder
           POSTGRES_DB=tasklytics
           EOF
+          cat > tasklytics-skill-testing-backend/.env.docker <<'EOF'
+          DATABASE_URL=postgresql://ci_placeholder:ci_placeholder@db:5432/tasklytics
+          SECRET_KEY=ci_placeholder_secret_key
+          ENV=docker
+          ANTHROPIC_API_KEY=ci_placeholder_key
+          EOF
+          touch tasklytics-skill-testing-frontend/.env
 
       - name: Validate docker compose config
         run: docker compose config
