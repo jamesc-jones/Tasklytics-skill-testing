@@ -1,0 +1,67 @@
+name: Backend Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tasklytics-skill-testing-backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run backend test suite
+        run: python -m pytest tests/ -v
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tasklytics-skill-testing-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Lint (report-only - 4 pre-existing errors as of Phase 5, unrelated to this pipeline, not blocking)
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Build
+        run: npm run build
+
+  docker-build-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create throwaway .env for compose variable substitution (build-only, no real secrets)
+        run: |
+          cat > .env <<'EOF'
+          POSTGRES_USER=ci_placeholder
+          POSTGRES_PASSWORD=ci_placeholder
+          POSTGRES_DB=tasklytics
+          EOF
+
+      - name: Validate docker compose config
+        run: docker compose config
+
+      - name: Build backend and frontend images
+        run: docker compose build backend frontend
