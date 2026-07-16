@@ -28,12 +28,25 @@ from app.api.routes import chat
 app = FastAPI(
     title="Tasklytics API",
     description="Task management backend with JWT auth",
-    version="1.0.0"
+    version="1.0.0",
+    # nginx proxies /api/ -> this app's root, stripping the /api prefix before
+    # forwarding (see nginx/default.conf's `location /api/`). This app never
+    # sees that prefix in scope["path"], so route matching is unaffected - but
+    # without root_path set, FastAPI generates self-referencing URLs (Swagger
+    # UI's embedded openapi.json fetch, the OpenAPI schema's `servers` entry)
+    # as root-relative, ignoring the proxy prefix. That breaks /api/docs: the
+    # page loads, then tries to fetch /openapi.json (no /api prefix), which
+    # hits nginx's frontend catch-all instead of this backend. root_path fixes
+    # URL *generation* only; it does not change how incoming requests match
+    # routes.
+    root_path="/api",
 )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://tasklytics2ai.com",
+        "https://www.tasklytics2ai.com",
         "http://159.203.26.144",
         "http://www.159.203.26.144",
         "http://127.0.0.1:8000",
