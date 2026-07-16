@@ -29,6 +29,9 @@ def get_current_user(
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
 
+        if payload.get("type") != "access":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
