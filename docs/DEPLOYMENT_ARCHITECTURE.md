@@ -70,6 +70,8 @@ Note: the legacy `/ai/task-insights` endpoint (Together AI-backed) bypasses the 
 
 ## AI Architecture
 
+*Both subsystems described below are now confirmed functional against live production traffic — see `PRODUCTION_VERIFICATION.md` §5. This section describes the design as implemented in source; runtime verification status lives in that document, not here.*
+
 Two independently-evolved subsystems exist side by side — confirmed both from `CLAUDE.md` and from git history (e.g. `abff6cb Refactor chatbot into Claude agent architecture layer`, `ba330a0 Working on adding Claude Agent SDK`), which shows the current system was built as a later addition rather than a rewrite of the legacy one.
 
 ### Legacy: `app/ai/` — single-shot insights
@@ -94,6 +96,8 @@ Two independently-evolved subsystems exist side by side — confirmed both from 
 - **Certbot** — runs on the host (not in Docker), webroot-authenticated (switched from `--standalone` specifically because the containerized nginx already owns port 80, so `--standalone`'s own port-80 binding during renewal conflicted with it)
 - **Health checks** — per-service, protocol-appropriate probes (HTTP GET for backend/frontend, `pg_isready` for Postgres, HTTPS `curl` for nginx), added specifically to close the gap where `restart: always` only reacts to a process exiting, not to a process that is running but non-functional
 - **Logging** — `json-file` driver, `max-size: 10m` / `max-file: 3` per service, added specifically because the Docker default has no size cap and none was previously configured
+
+*Health check and logging configuration confirmed applied on the live production containers — see `PRODUCTION_VERIFICATION.md` §1 and §4.*
 
 ## Architectural decisions and tradeoffs
 
