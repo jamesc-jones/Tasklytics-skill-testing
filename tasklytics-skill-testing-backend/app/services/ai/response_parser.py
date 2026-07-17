@@ -1,6 +1,6 @@
 import json
 
-from sqlalchemy.dialects.mysql.reflection import cleanup_text
+from app.models.chat_models import ChatResponse
 
 
 def parse_claude_response(raw_text):
@@ -18,7 +18,14 @@ def parse_claude_response(raw_text):
                 .strip()
             )
 
-        return json.loads(cleaned_text)
+        parsed = json.loads(cleaned_text)
+
+        # Validate against the same schema FastAPI enforces at the route
+        # boundary (response_model=ChatResponse) - catches a schema mismatch
+        # here, with the existing graceful fallback, instead of letting an
+        # unhandled 500 surface at the API layer.
+        validated = ChatResponse(**parsed)
+        return validated.model_dump()
 
     except Exception as e:
 
